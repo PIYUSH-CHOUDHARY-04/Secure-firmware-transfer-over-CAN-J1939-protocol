@@ -1,0 +1,8 @@
+            Libraries used in the entire project
+            ====================================
+
+1.) HAL library for the STM32F401 micro-processor(for writing firmware and flash programming functionality.)
+2.) AES library
+3.) HMAC library
+4.) J1939 library
+5.) CAN controller library
