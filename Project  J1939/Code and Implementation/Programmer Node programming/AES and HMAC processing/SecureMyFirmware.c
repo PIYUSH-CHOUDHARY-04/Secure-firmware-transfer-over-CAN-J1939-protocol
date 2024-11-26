@@ -1,0 +1,109 @@
+#include<stdio.h>
+#include<stdlib.h>
+#include "aes.h"
+#include "hmac.h"
+#include "sha1.h"
+#include<string.h>
+
+#define FILE_RENAME_ENCR_ONLY 0x0a
+#define FILE_RENAME_ENCR_ONLY_STR "encr_only_"
+#define FILE_RENAME_SECURED 0x08
+#define FILE_RENAME_SECURED_STR "secured_"
+#define HMAC_OUTPUT_SIZE 20
+
+uint8_t IV[16]={0x5b, 0x7a, 0x09, 0x99, 0xb1, 0x2c, 0xce, 0x2e, 0x3c, 0x3c, 0x78, 0xfb, 0x97, 0x68, 0x92, 0xd6};
+uint8_t AES256_KEY[32]={0x78, 0x8d, 0x35, 0x7e, 0xac, 0x5a, 0xb4, 0x51, 0xf4, 0x41, 0x6c, 0xb5, 0xb0, 0xc2, 0x44, 0x12, 0xac, 0x04, 0xeb, 0xdb, 0x82, 0xe5, 0xd2, 0x25, 0x8f, 0xae, 0x71, 0xe5, 0x90, 0x77, 0x90, 0x60};
+uint32_t encrypted_firmware_size=0;
+uint8_t HMAC_CODE[HMAC_OUTPUT_SIZE]={0};
+uint8_t HMAC_KEY[]="@s9df6*0BiJqx%(L;dM-zP+~hY\0";	/* will count the null terminator in the key calculations. */
+
+
+void main(int argc, char** argv){
+	
+		FILE* fptr_bin=fopen(argv[1],"rb");
+		if(fptr_bin==NULL){
+			printf("Error : Unable to open the specified file %s\n",argv[1]);
+			return;
+		}
+		/* Getting the file size. */
+		fseek(fptr_bin,0,SEEK_END);
+		long size=ftell(fptr_bin);
+		long firmware_size=size;
+		rewind(fptr_bin);
+		printf("Firmware size : %ld\n",size);
+		/* Allocating memory for storing the file content.  */
+		/* Size of the data to be encrypted is knows, now need to calculate the padding byte count and then adding space for IV */
+		if((size%AES_BLOCKSIZE)==0){
+			/* padding = 16 bytes */
+			printf("Padding size : %d\n",AES_BLOCKSIZE);
+			size+=(2*AES_BLOCKSIZE);
+		}else{
+			printf("Padding size : %d\n",AES_BLOCKSIZE-(size%AES_BLOCKSIZE));
+			size+=((2*AES_BLOCKSIZE)-(size%AES_BLOCKSIZE));
+		}
+		
+		printf("Allocating byte_array of size : %ld\n",size);
+		uint8_t* ptr=(uint8_t*)malloc(sizeof(uint8_t)*size);
+		/* reading entire file into the above array pointed by "ptr" */
+		printf("Reading firmware file...\n");
+		if(fread(ptr,sizeof(uint8_t),firmware_size,fptr_bin)!=firmware_size){
+			printf("Error : Unable to read from the %s file\n",argv[1]);
+			return;
+		}
+		printf("Read completed, Encrypting the file...\n");
+		AES_Encrypt(AES256,ptr,(uint32_t)firmware_size,AES256_KEY,&encrypted_firmware_size,IV);
+		printf("Encryption completed !\nEncrypted firmware size : %d\n",encrypted_firmware_size);
+		/* Encrypted data with padding bytes and IV appended are in array pointed by "ptr" */
+
+		/* file renaming handling. */
+		/* for just AES encrypted file, naming as "encr_only_<actual file name> i.e. adding 10 bytes before file name. */
+		uint8_t* rename=(uint8_t*)malloc(sizeof(uint8_t)*(FILE_RENAME_ENCR_ONLY+strlen(argv[1])+1)); /* +1 for null terminator. */
+		memcpy(rename,FILE_RENAME_ENCR_ONLY_STR,FILE_RENAME_ENCR_ONLY);
+		/* copying the file name now. */
+		memcpy(rename+FILE_RENAME_ENCR_ONLY,argv[1],strlen(argv[1]));
+		rename[FILE_RENAME_ENCR_ONLY+strlen(argv[1])]='\0';
+
+
+		/* opening a file to write the encrypted data  */
+		FILE* fptr_encr_only=fopen(rename,"wb");
+		if(fptr_encr_only==NULL){
+			printf("Error : Unable to create new file %s\n",rename);
+			return;
+		}	
+		if(fwrite(ptr,sizeof(uint8_t),size,fptr_encr_only)!=size){
+			printf("Error : Unable to write to %s\n",rename);
+			return;
+		}	
+		fclose(fptr_encr_only);
+		free(rename);
+		/* Now we've written the encrypted data to a separate file and we've encrypted data present in an array, thus proceeding towards HMAC calculations. */
+
+		hmac_sha1(HMAC_KEY, (uint32_t)strlen(HMAC_KEY)+1, ptr, size, HMAC_CODE);
+
+		/* file renaming for final step. */
+		rename=(uint8_t*)malloc(sizeof(uint8_t)*(FILE_RENAME_SECURED+strlen(argv[1])+1));
+		memcpy(rename,FILE_RENAME_SECURED_STR,FILE_RENAME_SECURED);		
+		/* copying the file name now. */
+		memcpy(rename+FILE_RENAME_SECURED,argv[1],strlen(argv[1]));
+		rename[FILE_RENAME_SECURED+strlen(argv[1])]='\0';
+
+		/* opening a file to write the encrypted data with HMAC appended */
+		FILE* fptr_secured=fopen(rename,"wb");
+		if(fptr_secured==NULL){
+			printf("Error : Unable to create new file %s\n",rename);
+			return;
+		}
+		if(fwrite(ptr,sizeof(uint8_t))!=size+HMAC_OUTPUT_SIZE,size,fptr_secured){
+			printf("Error : Unable to write to %s\n",rename);
+			return;
+		}
+		/* Now appending the HMAC code. */
+
+		if(fwrite(HMAC_CODE,sizeof(uint8_t),HMAC_OUTPUT_SIZE,fptr_secured)!=HMAC_OUTPUT_SIZE){
+			printf("Error : Unable to append the HMAC code.\n");
+			return;
+		}
+		/* closing file and freeing allocated memory */
+		free(rename);
+		free(ptr);
+}
