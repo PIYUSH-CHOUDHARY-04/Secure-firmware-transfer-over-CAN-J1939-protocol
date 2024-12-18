@@ -1,0 +1,5 @@
+	Project J1939 secure communications
+	===================================
+
+Task : Perform secure firmware transfer and firmware update over CAN-J1939 protocol, security refers to encrypting the firmware on sender side with AES256 and then calculating and appending its HMAC code to the encrypted firmware
+       which in turn when received by receiver node, evaluated for integrity check via re-computation and comparing with received HMAC code, and at last performing firmware update.
